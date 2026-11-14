@@ -126,6 +126,54 @@ def test_exclude_joints_supports_partial_name_matching():
     assert step._build_mask(len(names)) == [True, False, True, False]
 
 
+def test_exclude_joints_supports_nested_action_names():
+    nested_names = [
+        ["right_joint_1.pos", "right_gripper.pos"],
+        ["left_joint_1.pos", "left_gripper.pos"],
+    ]
+    step = RelativeActionsProcessorStep(enabled=True, exclude_joints=["gripper"], action_names=nested_names)
+    assert step._build_mask(4) == [True, False, True, False]
+
+
+def test_exclude_joints_supports_nested_tuples_and_dicts():
+    tuple_names = (
+        ("right_joint_1.pos", "right_gripper.pos"),
+        ("left_joint_1.pos", "left_gripper.pos"),
+    )
+    step = RelativeActionsProcessorStep(enabled=True, exclude_joints=["gripper"], action_names=tuple_names)
+    assert step._build_mask(4) == [True, False, True, False]
+
+    dict_names = {
+        "right": ["right_joint_1.pos", "right_gripper.pos"],
+        "left": ["left_joint_1.pos", "left_gripper.pos"],
+    }
+    step_dict = RelativeActionsProcessorStep(
+        enabled=True, exclude_joints=["gripper"], action_names=dict_names
+    )
+    assert step_dict._build_mask(4) == [True, False, True, False]
+
+
+def test_relative_processor_uses_nested_action_names_mask():
+    nested_names = [
+        ["right_joint_1.pos", "right_gripper.pos"],
+        ["left_joint_1.pos", "left_gripper.pos"],
+    ]
+    step = RelativeActionsProcessorStep(enabled=True, exclude_joints=["gripper"], action_names=nested_names)
+    abs_step = AbsoluteActionsProcessorStep(enabled=True, relative_step=step)
+
+    state = torch.tensor([[10.0, 20.0, 30.0, 40.0]])
+    action = torch.tensor([[12.0, 25.0, 33.0, 47.0]])
+    transition = create_transition(action=action, observation={OBS_STATE: state})
+
+    processed = step(transition)
+    rel_action = processed[TransitionKey.ACTION]
+    expected_rel = torch.tensor([[2.0, 25.0, 3.0, 47.0]])
+    torch.testing.assert_close(rel_action, expected_rel)
+
+    restored = abs_step(create_transition(action=rel_action))
+    torch.testing.assert_close(restored[TransitionKey.ACTION], action)
+
+
 # Chunk-level relative stats test
 
 

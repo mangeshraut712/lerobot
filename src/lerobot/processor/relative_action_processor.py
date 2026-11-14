@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -99,6 +99,21 @@ def to_absolute_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) ->
     return actions
 
 
+def _flatten_action_names(names: Any) -> list[str]:
+    """Recursively flatten nested lists, tuples, or dict values of action dimension names."""
+    if isinstance(names, Mapping):
+        return _flatten_action_names(list(names.values()))
+    flat: list[str] = []
+    for item in names:
+        if isinstance(item, (list, tuple)):
+            flat.extend(_flatten_action_names(item))
+        elif isinstance(item, Mapping):
+            flat.extend(_flatten_action_names(list(item.values())))
+        elif item is not None:
+            flat.append(str(item))
+    return flat
+
+
 @ProcessorStepRegistry.register("relative_actions_processor")
 @dataclass
 class RelativeActionsProcessorStep(ProcessorStep):
@@ -113,12 +128,14 @@ class RelativeActionsProcessorStep(ProcessorStep):
         enabled: Whether to apply the relative conversion.
         exclude_joints: Joint names to keep absolute (not converted to relative).
         action_names: Action dimension names from dataset metadata, used to build
-            the mask from exclude_joints. If None, all dims are converted.
+            the mask from exclude_joints. If None, all dims are converted. Supports
+            both flat sequences and nested sequences/dicts (e.g. bimanual or multi-arm
+            setups).
     """
 
     enabled: bool = False
     exclude_joints: list[str] = field(default_factory=list)
-    action_names: list[str] | None = None
+    action_names: Sequence[Any] | None = None
     _last_state: torch.Tensor | None = field(default=None, init=False, repr=False)
     _count_queued_actions: Callable[[], int] | None = field(default=None, init=False, repr=False)
 
@@ -130,8 +147,9 @@ class RelativeActionsProcessorStep(ProcessorStep):
         if not exclude_tokens:
             return [True] * action_dim
 
+        flat_names = _flatten_action_names(self.action_names)
         mask = []
-        for name in self.action_names[:action_dim]:
+        for name in flat_names[:action_dim]:
             action_name = str(name).lower()
             is_excluded = any(token == action_name or token in action_name for token in exclude_tokens)
             mask.append(not is_excluded)
